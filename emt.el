@@ -1,12 +1,13 @@
-;;; emt.el  --- Tokenizing CJK words and symbols with macOS's built-in NLP tokenizer  -*- lexical-binding: t; -*-
+;;; emt.el --- Tokenizing CJK words with NLP tokenizer  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2023 Roife Wu
 
 ;; Author: Roife Wu <roifewu@gmail.com>
-;; URL: https://github.com/roife/emt
-;; Version: 2.0.0
+;; Maintainer: LuciusChen
+;; URL: https://github.com/LuciusChen/meow-cjk
+;; Version: 2.1.0
 ;; Package-Requires: ((emacs "26.1"))
-;; Keywords: chinese, cjk, tokenizer, macos, mac, natural language, segmentation
+;; Keywords: chinese, cjk, tokenizer, natural language, segmentation
 
 ;; This file is NOT a part of GNU Emacs.
 
@@ -25,9 +26,14 @@
 
 ;;; Commentary:
 
-;; EMT stands for Emacs MacOS Tokenizer.
-;; This package use macOS's built-in NLP tokenizer to tokenize and operate on
-;; CJK words in Emacs.
+;; A fork of EMT (https://github.com/roife/emt) with cross-platform support
+;; via ewt-rs (https://github.com/Master-Hash/ewt-rs).
+;;
+;; Instead of the original macOS-only Swift module, this fork downloads the
+;; ewt-rs dynamic module which supports:
+;;   - macOS  (ICU backend)
+;;   - Linux  (ICU backend)
+;;   - Windows (WinRT backend, recommended; or ICU)
 
 ;;; Code:
 
@@ -37,7 +43,7 @@
 ;;; Customize
 
 (defgroup emt ()
-  "Tokenize CJK words with macOS's built-in NLP tokenizer."
+  "Tokenize CJK words with NLP tokenizer."
   :group 'chinese
   :prefix "emt-")
 
@@ -51,22 +57,30 @@
   :type 'integer
   :group 'emt)
 
-(defcustom emt-lib-path (concat user-emacs-directory "modules/libEMT" module-file-suffix)
-  "The path to the directory of dynamic library for emt."
+(defcustom emt-lib-path
+  (concat user-emacs-directory "modules/libEMT" module-file-suffix)
+  "The path to the dynamic library for emt."
   :type 'string
   :group 'emt)
 
-;;; Export function
+(defcustom emt-windows-use-winrt nil
+  "If non-nil, download the smaller WinRT backend on Windows instead of ICU.
+WinRT is recommended for Simplified Chinese; ICU for Traditional Chinese."
+  :type 'boolean
+  :group 'emt)
 
-(defconst emt-version "v2.1.0")
+;;; Internal variables
+
+(defconst emt-ewt-version "v0.4.0"
+  "The version of ewt-rs to download.")
 
 (defvar emt--root (file-name-directory (or load-file-name buffer-file-name))
   "The path to the root of the package.")
 
-(defvar emt--cjk-regex-forward (format "\\(\\cc\\|\\cj\\|\\ch\\)+\\W*$")
+(defvar emt--cjk-regex-forward "\\(\\cc\\|\\cj\\|\\ch\\)+\\W*$"
   "Forward regex for CJK.")
 
-(defvar emt--cjk-regex-backward (format "^\\W*\\(\\cc\\|\\cj\\|\\ch\\)+")
+(defvar emt--cjk-regex-backward "^\\W*\\(\\cc\\|\\cj\\|\\ch\\)+"
   "Backward regex for CJK.")
 
 (defvar emt--lib-loaded nil
@@ -81,7 +95,9 @@
 (defvar emt--lib-fns
   '(emt--do-split-helper
     emt--word-at-point-or-forward-helper)
-  "The list of functions in dynamic module.")
+  "The list of functions that must exist in the dynamic module.")
+
+;;; Cache
 
 (defun emt--cache-get (key)
   "Get the value of KEY in cache."
@@ -95,8 +111,8 @@
         (push key emt--cache-lru-list))
       (if (zerop leading)
           value
-        (mapcar #'(lambda (pair) (cons (+ (car pair) leading)
-                                  (+ (cdr pair) leading)))
+        (mapcar (lambda (pair) (cons (+ (car pair) leading)
+                                     (+ (cdr pair) leading)))
                 value)))))
 
 (defun emt--cache-put (key value)
@@ -105,8 +121,8 @@
     (when (zerop (string-match "\\W*" key))
       (setq leading (match-end 0)))
     (unless (zerop leading)
-      (setq value (mapcar #'(lambda (pair) (cons (- (car pair) leading)
-                                            (- (cdr pair) leading)))
+      (setq value (mapcar (lambda (pair) (cons (- (car pair) leading)
+                                               (- (cdr pair) leading)))
                           value)))
     (setq key (string-trim (substring-no-properties key) "\\W*" "\\W*"))
     (puthash key value emt--cache-set)
@@ -114,12 +130,12 @@
     (when (> (length emt--cache-lru-list) emt-cache-lru-size)
       (setq emt--cache-lru-list (butlast emt--cache-lru-list)))))
 
+;;; Helpers
+
 (defun emt--get-bounds-at-point (direction)
   "Get the bounds of the CJK string at point.
 
-If DIRECTION is `'forward', return the bounds of the string forward.
-If DIRECTION is `'backward', return the bounds of the string backward.
-If DIRECTION is `'all', return the bounds of the string forward and backward."
+DIRECTION can be `forward', `backward', or `all'."
   (let* ((pos (point))
          (beg pos)
          (end pos))
@@ -138,21 +154,20 @@ If DIRECTION is `'all', return the bounds of the string forward and backward."
     (cons beg end)))
 
 (defun emt--word-at-point (back)
-  "Return the word at point.
-
-If BACK is non-nil, return the word backward."
+  "Return the word at point.  If BACK is non-nil, return the word backward."
   (unless emt--lib-loaded (error "Dynamic module not loaded"))
   (pcase-let* ((`(,beg . ,end) (emt--get-bounds-at-point 'all))
                (index (- (point) beg))
-               (`(,word-beg . ,word-end) (emt--word-at-point-or-forward-helper
-                                          (buffer-substring-no-properties beg end)
-                                          (if (and back (> index 0)) (1- index) index))))
+               (`(,word-beg . ,word-end)
+                (emt--word-at-point-or-forward-helper
+                 (buffer-substring-no-properties beg end)
+                 (if (and back (> index 0)) (1- index) index))))
     (if (eq word-beg word-end)
         (word-at-point)
       (buffer-substring (+ beg word-beg) (+ beg word-end)))))
 
 (defun emt--upperbound (pred vec)
-  "Binary search to find the last element in VEC satisfying PRED."
+  "Binary search for the last element in VEC satisfying PRED."
   (if (zerop (length vec)) nil
     (let ((start 0)
           (end (1- (length vec))))
@@ -164,7 +179,7 @@ If BACK is non-nil, return the word backward."
       (elt vec start))))
 
 (defun emt--lowerbound (pred vec)
-  "Binary search to find the first element in VEC satisfying PRED."
+  "Binary search for the first element in VEC satisfying PRED."
   (if (zerop (length vec)) nil
     (let ((start 0)
           (end (1- (length vec))))
@@ -172,13 +187,11 @@ If BACK is non-nil, return the word backward."
         (let ((mid (ash (+ start end) -1)))
           (if (funcall pred (elt vec mid))
               (setq end mid)
-            (setq start (1+ start)))))
+            (setq start (1+ mid)))))
       (elt vec end))))
 
 (defun emt--move-by-word-decide-bounds-direction (direction)
-  "Decide the direction when moving by word.
-
-DIRECTION is the direction of moving by word."
+  "Decide the CJK bounds direction based on movement DIRECTION."
   (if (eq direction 'forward)
       (if (and (char-after) (string-match "\\W" (char-to-string (char-after))))
           'forward
@@ -188,30 +201,28 @@ DIRECTION is the direction of moving by word."
       'all)))
 
 (defun emt--move-by-word (direction)
-  "Move point by word.
-
-If DIRECTION is `'forward', move point forward by word.
-If DIRECTION is `'backward', move point backward by word."
+  "Move point by one CJK word in DIRECTION (`forward' or `backward')."
   (pcase-let ((forward-p (eq direction 'forward))
-              (`(,beg . ,end) (emt--get-bounds-at-point
-                               (emt--move-by-word-decide-bounds-direction direction))))
+              (`(,beg . ,end)
+               (emt--get-bounds-at-point
+                (emt--move-by-word-decide-bounds-direction direction))))
     (if (eq beg end)
         (if forward-p (forward-word) (backward-word))
       (let* ((text (buffer-substring-no-properties beg end))
              (pos (- (point) beg))
              (pred (if forward-p (lambda (x) (> x pos)) (lambda (x) (< x pos))))
-             (target-bound (funcall (if forward-p #'emt--lowerbound #'emt--upperbound)
-                                    pred
-                                    (mapcar (if forward-p #'cdr #'car) (emt-split text)))))
+             (target-bound
+              (funcall (if forward-p #'emt--lowerbound #'emt--upperbound)
+                       pred
+                       (mapcar (if forward-p #'cdr #'car) (emt-split text)))))
         (if (and target-bound (funcall pred target-bound))
             (goto-char (+ beg target-bound))
           (if forward-p (forward-word) (backward-word)))))))
 
-(defun emt-split (str)
-  "Split STR into a list of words.
+;;; Public API
 
-Return a list of word bounds (a cons of the beginning position and the ending
-position of a word)"
+(defun emt-split (str)
+  "Split STR into a list of word bounds (BEG . END)."
   (if emt--lib-loaded
       (if-let ((cached (and emt-use-cache (emt--cache-get str))))
           cached
@@ -221,80 +232,80 @@ position of a word)"
     (error "Dynamic module not loaded")))
 
 (defun emt-get-arch ()
+  "Return the CPU architecture string for the current system."
   (cond
-   ((string-match-p "aarch64" system-configuration)
-    "aarch64")
-   ((string-match-p "x86_64" system-configuration)
-    "x86_64")
-   (t
-    (error "Unknow architecture")))
-  )
+   ((string-match-p "aarch64\\|arm64" system-configuration) "aarch64")
+   ((string-match-p "x86_64"          system-configuration) "x86_64")
+   (t (error "Unsupported architecture: %s" system-configuration))))
 
 ;;;###autoload
 (defun emt-word-at-point-or-forward ()
-  "Return the word at point.
-
-If current point is at bound of a word, return the one forward."
+  "Return the CJK word at point, or the one forward if at a boundary."
   (interactive)
   (emt--word-at-point nil))
 
 ;;;###autoload
 (defun emt-word-at-point-or-backward ()
-  "Return the word at point.
-
-If current point is at bound of a word, return the one backward."
+  "Return the CJK word at point, or the one backward if at a boundary."
   (interactive)
   (emt--word-at-point t))
 
 ;;;###autoload
 (defun emt-download-module (&optional path)
-  "Download dynamic module from GitHub release.
+  "Download the ewt-rs dynamic module from GitHub releases.
 
-If PATH is non-nil, download the module to PATH."
-    (interactive)
-    (unless (eq system-type 'darwin)
-      (error "EMT only support macOS"))
-    (setq path (or path emt-lib-path))
-    (make-directory (file-name-directory path) t)
-    (let* ((arch (emt-get-arch))
-           (url (format "https://github.com/roife/emt/releases/download/%s/libEMT-%s.dylib" emt-version arch)))
-      (url-copy-file url path t)))
+Supports macOS, Linux, and Windows.  The module is placed at PATH,
+defaulting to `emt-lib-path'.
 
-;;;###autoload
-(defun emt-compile-module (&optional path)
-  "Compile dynamic module.
-
-If PATH is non-nil, compile the module to PATH."
+On Windows, both ICU (default) and WinRT backends are available.
+See `emt-windows-use-winrt' to use the smaller WinRT variant."
   (interactive)
-  (unless (eq system-type 'darwin)
-    (error "Only support macOS"))
-  (unless module-file-suffix
-    (error "Variable `module-file-suffix' is nil"))
-  (unless (executable-find "swift")
-    (error "Swift compiler not found"))
-  (unless (file-directory-p (concat emt--root "module/"))
-    (error "No module source found"))
-  (unless (file-exists-p "/Applications/Xcode.app")
-    (error "Xcode not found. You can download pre-compiled module from GitHub"))
-
-  (shell-command (concat "echo " (shell-quote-argument (read-passwd "sudo password (required by compiling EMT):"))
-                         " | sudo -S xcode-select --switch /Applications/Xcode.app/Contents/Developer"))
-
   (setq path (or path emt-lib-path))
-  (let ((default-directory (concat emt--root "module/")))
-    (if (zerop (shell-command "swift build -c release"))
-        (progn (message "Compile succeed!")
-               (make-directory (file-name-directory path) t)
-               (copy-file (concat emt--root "module/.build/release/libEMT" module-file-suffix)
-                          path t))
-      (error "Compile dynamic module failed"))))
+  (make-directory (file-name-directory path) t)
+  (let* ((arch (emt-get-arch))
+         (triple
+          (cond
+           ((eq system-type 'darwin)
+            (concat arch "-apple-darwin"))
+           ((eq system-type 'gnu/linux)
+            (concat arch "-unknown-linux-gnu"))
+           ((eq system-type 'windows-nt)
+            (concat arch "-pc-windows-msvc"))
+           (t (error "Unsupported platform: %s" system-type))))
+         (zip-prefix
+          (if (and (eq system-type 'windows-nt) emt-windows-use-winrt)
+              "libewt-windows"
+            "libewt-icu_segmenter"))
+         (zip-name (format "%s-%s.zip" zip-prefix triple))
+         (url (format "https://github.com/Master-Hash/ewt-rs/releases/download/%s/%s"
+                      emt-ewt-version zip-name))
+         (tmp-dir (make-temp-file "ewt-download-" t))
+         (tmp-zip (expand-file-name zip-name tmp-dir))
+         (lib-filename (if (eq system-type 'windows-nt)
+                           (format "ewt%s" module-file-suffix)
+                         (format "libewt%s" module-file-suffix)))
+         (inner-lib (expand-file-name
+                     (format "download/%s-%s/%s" zip-prefix triple lib-filename)
+                     tmp-dir)))
+    (message "Downloading ewt-rs module from %s ..." url)
+    (url-copy-file url tmp-zip t)
+    (message "Extracting ...")
+    (if (eq system-type 'windows-nt)
+        (call-process "powershell" nil nil nil
+                      "-command"
+                      (format "Expand-Archive -Path '%s' -DestinationPath '%s' -Force"
+                              tmp-zip tmp-dir))
+      (call-process "unzip" nil nil nil "-o" tmp-zip "-d" tmp-dir))
+    (unless (file-exists-p inner-lib)
+      (delete-directory tmp-dir t)
+      (error "Extraction failed: %s not found" inner-lib))
+    (copy-file inner-lib path t)
+    (delete-directory tmp-dir t)
+    (message "EMT module installed to %s" path)))
 
 ;;;###autoload
 (defun emt-forward-word (&optional arg)
-  "CJK compatible version of `forward-word'.
-
-Move point forward ARG words (backward if ARG is negative).
-If ARG is omitted or nil, move point forward one word."
+  "CJK-compatible `forward-word', moving ARG words."
   (interactive "^p")
   (setq arg (or arg 1))
   (let ((direction (if (< arg 0) 'backward 'forward))
@@ -306,52 +317,39 @@ If ARG is omitted or nil, move point forward one word."
 
 ;;;###autoload
 (defun emt-backward-word (&optional arg)
-  "CJK compatible version of `backward-word'.
-
-Move point backward ARG words (forward if ARG is negative).
-If ARG is omitted or nil, move point forward one word."
+  "CJK-compatible `backward-word', moving ARG words."
   (interactive "^p")
   (setq arg (or arg 1))
   (emt-forward-word (- arg)))
 
 ;;;###autoload
 (defun emt-kill-word (arg)
-  "CJK compatible version of `kill-word'.
-
-Kill characters forward until encountering the end of a word.
-With argument ARG, do this that many times."
+  "CJK-compatible `kill-word', killing ARG words forward."
   (interactive "p")
   (kill-region (point) (progn (emt-forward-word arg) (point))))
 
 ;;;###autoload
 (defun emt-backward-kill-word (arg)
-  "CJK compatible version of `backward-kill-word'.
-
-Kill characters backward until encountering the beginning of a word.
-With argument ARG, do this that many times."
+  "CJK-compatible `backward-kill-word', killing ARG words backward."
   (interactive "p")
   (emt-kill-word (- arg)))
 
 ;;;###autoload
 (defun emt-mark-word (&optional arg)
-  "CJK compatible version of `mark-word'.
-
-Set mark ARG words from point or move mark one word."
+  "CJK-compatible `mark-word', marking ARG words."
   (interactive "p")
   (set-mark (point))
   (emt-forward-word arg))
 
 ;;;###autoload
 (defun emt-ensure ()
-  "Load the dynamic library."
+  "Ensure the dynamic module is loaded, downloading it if necessary."
   (interactive)
   (unless emt--lib-loaded
     (unless (file-exists-p emt-lib-path)
-      (if (yes-or-no-p "EMT module not found. Download pre-built from GitHub?")
+      (if (yes-or-no-p "EMT module not found. Download ewt-rs pre-built from GitHub? ")
           (emt-download-module)
-        (if (yes-or-no-p "Compile EMT module from source?")
-            (emt-compile-module)
-          (error "EMT module cannot be loaded"))))
+        (error "EMT module cannot be loaded")))
     (load-file emt-lib-path)
     (dolist (fn emt--lib-fns)
       (unless (fboundp fn)
@@ -363,17 +361,17 @@ Set mark ARG words from point or move mark one word."
 ;;;###autoload
 (defvar emt-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [remap forward-word] #'emt-forward-word)
-    (define-key map [remap backward-word] #'emt-backward-word)
-    (define-key map [remap kill-word] #'emt-kill-word)
-    (define-key map [remap backward-kill-word] #'emt-backward-kill-word)
-    (define-key map [remap mark-word] #'emt-mark-word)
-    (define-key map [remap word-at-point] #'emt-word-at-point-or-forward)
+    (define-key map [remap forward-word]          #'emt-forward-word)
+    (define-key map [remap backward-word]         #'emt-backward-word)
+    (define-key map [remap kill-word]             #'emt-kill-word)
+    (define-key map [remap backward-kill-word]    #'emt-backward-kill-word)
+    (define-key map [remap mark-word]             #'emt-mark-word)
+    (define-key map [remap word-at-point]         #'emt-word-at-point-or-forward)
     map))
 
 ;;;###autoload
 (define-minor-mode emt-mode
-  "Minor mode for tokenizing CJK words with macOS's built-in NLP tokenizer."
+  "Minor mode for CJK word tokenization via ewt-rs."
   :global t
   :keymap emt-mode-map
   :lighter "emt"

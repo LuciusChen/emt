@@ -2,41 +2,28 @@
 
 ** Introduction
 
-EMT stands for =Emacs MacOS Tokenizer=.
+A fork of [[https://github.com/roife/emt][EMT]] with cross-platform support via [[https://github.com/Master-Hash/ewt-rs][ewt-rs]].
 
-This package use macOS's built-in NLP tokenizer to tokenize and operate on CJK words in Emacs.
+Instead of the original macOS-only Swift module, this fork downloads the ewt-rs dynamic module which supports:
+
+- macOS (ICU backend)
+- Linux (ICU backend)
+- Windows (WinRT backend, recommended; or ICU)
 
 ** Installation
 
 *** Requirements
 
-- macOS 10.15 or later
 - Emacs 26.1 or later, built with dynamic module support (use =--with-modules= during compilation)
+- macOS, Linux, or Windows
 
-*** Build dynamic module
+*** Dynamic module
 
 **** Pre-built (recommendation)
 
-If you enable =emt-mode= and the module cannot be found, it will prompt whether to automatically download it from GitHub. Or you can manually retrieve the pre-built module from the [[https://github.com/roife/emacs-macos-tokenizer/releases][releases]] section and place the =dylib= file in the =emacs-macos-tokenizer-lib-path= (by default, it is located at =modules/libEMT.dylib= within your personal configuration folder, normally =~/.emacs.d/modules/libEMT.dylib=).
+If you enable =emt-mode= and the module cannot be found, it will prompt whether to automatically download the ewt-rs pre-built module from GitHub. Or you can manually call =emt-download-module= to download it. The module is placed at =emt-lib-path= (by default =~/.emacs.d/modules/libEMT.<suffix>=).
 
-*Current version of the dynamic module is v2.0.0, make sure you have updated to latest module.*
-
-**** Manually build
-
-- Install Xcode.
-- Build the module using =emt-compile-module=, which compiles and copies the module to =emt-lib-path=.
-
-If you enconter the folloing error:
-
-#+begin_quote
-No such module "PackageDescription"
-#+end_quote
-
-run the following command and try again:
-
-#+begin_src bash
-  sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-#+end_src
+*Current version of the ewt-rs module is v0.4.0.*
 
 *** Install package
 
@@ -44,8 +31,8 @@ Install with =straight= and =use-package=:
 
 #+begin_src emacs-lisp
   (use-package emt
-    :straight (:host github :repo "roife/emt"
-                     :files ("*.el" "module/*" "module"))
+    :straight (:host github :repo "LuciusChen/emt"
+                     :files ("*.el"))
     :hook (after-init . emt-mode))
 #+end_src
 
@@ -61,7 +48,11 @@ The size of LRU cache. Default is =50=.
 
 *** =emt-lib-path=
 
-The path to the directory of dynamic library for emt. Default is =~/.emacs.d/modules/libEMT.dylib=.
+The path to the dynamic library for emt. Default is =~/.emacs.d/modules/libEMT<suffix>=.
+
+*** =emt-windows-use-winrt=
+
+If non-nil, download the smaller WinRT backend on Windows instead of ICU. WinRT is recommended for Simplified Chinese; ICU for Traditional Chinese. Default is =nil=.
 
 ** Usage
 
@@ -83,21 +74,13 @@ Return the word at point. If current point is at bound of a word, return the one
 
 Return the word at point. If current point is at bound of a word, return the one backward.
 
-**** =emt-compile-module=
-
-Compile and copy the module to =emt-lib-path=.
-
-It takes an optional argument =path=, which is the path to the directory of dynamic library. By default, =path= is set to =emt-lib-path=.
-
 **** =emt-download-module=
 
-Download dynamic module from  =https://github.com/roife/emt/releases/download/<VERSION>/libEMT.dylib=.
-
-If PATH is non-nil, download the module to PATH.
+Download the ewt-rs dynamic module from GitHub releases. Supports macOS, Linux, and Windows. If PATH is non-nil, download the module to PATH.
 
 **** =emt-ensure=
 
-Load dynamic module.
+Ensure the dynamic module is loaded, downloading it if necessary.
 
 **** =emt-split=
 
@@ -125,12 +108,7 @@ CJK compatible version of =backward-kill-word=.
 
 CJK compatible version of =mark-word=.
 
-** Alternatives
-
-- https://github.com/Master-Hash/ewt-rs : Tokenizer for Windows via WinRT API/ICU, also cross-platform capable.
-
 ** Acknowledgements
 
-This package is inspired by [[https://github.com/cireu/jieba.el/][jieba.el]] which is a Chinese tokenizer for Emacs using =jieba=.
-
-The dynamic module uses [[https://github.com/SavchenkoValeriy/emacs-swift-module.git][emacs-swift-module]], which provides an interface for writing Emacs dynamic modules in Swift.
+- [[https://github.com/roife/emt][roife/emt]]: The original macOS-only EMT package, inspired by [[https://github.com/cireu/jieba.el/][jieba.el]].
+- [[https://github.com/Master-Hash/ewt-rs][Master-Hash/ewt-rs]]: Cross-platform tokenizer backend used by this fork.
