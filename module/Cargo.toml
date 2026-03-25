@@ -1,0 +1,22 @@
+[package]
+name = "emt-module"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jieba-rs = "0.7"
+libc = "0.2"
+libc_alloc = "1.0"
+
+[build-dependencies]
+bindgen = "0.72"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
+panic = "abort"

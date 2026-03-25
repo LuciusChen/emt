@@ -4,8 +4,8 @@
 
 ;; Author: Roife Wu <roifewu@gmail.com>
 ;; Maintainer: LuciusChen
-;; URL: https://github.com/LuciusChen/meow-cjk
-;; Version: 2.1.0
+;; URL: https://github.com/LuciusChen/emt
+;; Version: 3.0.0
 ;; Package-Requires: ((emacs "26.1"))
 ;; Keywords: chinese, cjk, tokenizer, natural language, segmentation
 
@@ -27,13 +27,10 @@
 ;;; Commentary:
 
 ;; A fork of EMT (https://github.com/roife/emt) with cross-platform support
-;; via ewt-rs (https://github.com/Master-Hash/ewt-rs).
+;; via a built-in Rust dynamic module using jieba-rs for Chinese word
+;; segmentation.
 ;;
-;; Instead of the original macOS-only Swift module, this fork downloads the
-;; ewt-rs dynamic module which supports:
-;;   - macOS  (ICU backend)
-;;   - Linux  (ICU backend)
-;;   - Windows (WinRT backend, recommended; or ICU)
+;; Supports macOS, Linux, and Windows.
 
 ;;; Code:
 
@@ -63,16 +60,10 @@
   :type 'string
   :group 'emt)
 
-(defcustom emt-windows-use-winrt nil
-  "If non-nil, download the smaller WinRT backend on Windows instead of ICU.
-WinRT is recommended for Simplified Chinese; ICU for Traditional Chinese."
-  :type 'boolean
-  :group 'emt)
-
 ;;; Internal variables
 
-(defconst emt-ewt-version "v0.4.0"
-  "The version of ewt-rs to download.")
+(defconst emt--module-version "v0.1.0"
+  "The version of the emt dynamic module.")
 
 (defvar emt--root (file-name-directory (or load-file-name buffer-file-name))
   "The path to the root of the package.")
@@ -252,13 +243,10 @@ DIRECTION can be `forward', `backward', or `all'."
 
 ;;;###autoload
 (defun emt-download-module (&optional path)
-  "Download the ewt-rs dynamic module from GitHub releases.
+  "Download the pre-built emt dynamic module from GitHub releases.
 
-Supports macOS, Linux, and Windows.  The module is placed at PATH,
-defaulting to `emt-lib-path'.
-
-On Windows, both ICU (default) and WinRT backends are available.
-See `emt-windows-use-winrt' to use the smaller WinRT variant."
+The module is placed at PATH, defaulting to `emt-lib-path'.
+Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
   (interactive)
   (setq path (or path emt-lib-path))
   (make-directory (file-name-directory path) t)
@@ -272,35 +260,13 @@ See `emt-windows-use-winrt' to use the smaller WinRT variant."
            ((eq system-type 'windows-nt)
             (concat arch "-pc-windows-msvc"))
            (t (error "Unsupported platform: %s" system-type))))
-         (zip-prefix
-          (if (and (eq system-type 'windows-nt) emt-windows-use-winrt)
-              "libewt-windows"
-            "libewt-icu_segmenter"))
-         (zip-name (format "%s-%s.zip" zip-prefix triple))
-         (url (format "https://github.com/Master-Hash/ewt-rs/releases/download/%s/%s"
-                      emt-ewt-version zip-name))
-         (tmp-dir (make-temp-file "ewt-download-" t))
-         (tmp-zip (expand-file-name zip-name tmp-dir))
-         (lib-filename (if (eq system-type 'windows-nt)
-                           (format "ewt%s" module-file-suffix)
-                         (format "libewt%s" module-file-suffix)))
-         (inner-lib (expand-file-name
-                     (format "download/%s-%s/%s" zip-prefix triple lib-filename)
-                     tmp-dir)))
-    (message "Downloading ewt-rs module from %s ..." url)
-    (url-copy-file url tmp-zip t)
-    (message "Extracting ...")
-    (if (eq system-type 'windows-nt)
-        (call-process "powershell" nil nil nil
-                      "-command"
-                      (format "Expand-Archive -Path '%s' -DestinationPath '%s' -Force"
-                              tmp-zip tmp-dir))
-      (call-process "unzip" nil nil nil "-o" tmp-zip "-d" tmp-dir))
-    (unless (file-exists-p inner-lib)
-      (delete-directory tmp-dir t)
-      (error "Extraction failed: %s not found" inner-lib))
-    (copy-file inner-lib path t)
-    (delete-directory tmp-dir t)
+         (lib-filename (concat "libEMT-" triple
+                               (if (eq system-type 'windows-nt) ".dll"
+                                 (if (eq system-type 'darwin) ".dylib" ".so"))))
+         (url (format "https://github.com/LuciusChen/emt/releases/download/%s/%s"
+                      emt--module-version lib-filename)))
+    (message "Downloading emt module from %s ..." url)
+    (url-copy-file url path t)
     (message "EMT module installed to %s" path)))
 
 ;;;###autoload
@@ -343,11 +309,11 @@ See `emt-windows-use-winrt' to use the smaller WinRT variant."
 
 ;;;###autoload
 (defun emt-ensure ()
-  "Ensure the dynamic module is loaded, downloading it if necessary."
+  "Ensure the dynamic module is loaded, downloading if necessary."
   (interactive)
   (unless emt--lib-loaded
     (unless (file-exists-p emt-lib-path)
-      (if (yes-or-no-p "EMT module not found. Download ewt-rs pre-built from GitHub? ")
+      (if (yes-or-no-p "EMT module not found. Download pre-built from GitHub? ")
           (emt-download-module)
         (error "EMT module cannot be loaded")))
     (load-file emt-lib-path)
@@ -371,7 +337,7 @@ See `emt-windows-use-winrt' to use the smaller WinRT variant."
 
 ;;;###autoload
 (define-minor-mode emt-mode
-  "Minor mode for CJK word tokenization via ewt-rs."
+  "Minor mode for CJK word tokenization via jieba-rs."
   :global t
   :keymap emt-mode-map
   :lighter "emt"

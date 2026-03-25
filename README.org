@@ -2,13 +2,13 @@
 
 ** Introduction
 
-A fork of [[https://github.com/roife/emt][EMT]] with cross-platform support via [[https://github.com/Master-Hash/ewt-rs][ewt-rs]].
+A fork of [[https://github.com/roife/emt][EMT]] with cross-platform Chinese word segmentation powered by [[https://github.com/messense/jieba-rs][jieba-rs]].
 
-Instead of the original macOS-only Swift module, this fork downloads the ewt-rs dynamic module which supports:
+Instead of the original macOS-only Swift module (or the ICU-based ewt-rs), this fork uses a built-in Rust dynamic module with jieba-rs, providing accurate Chinese word segmentation on all platforms:
 
-- macOS (ICU backend)
-- Linux (ICU backend)
-- Windows (WinRT backend, recommended; or ICU)
+- macOS (aarch64, x86_64)
+- Linux (x86_64)
+- Windows (x86_64)
 
 ** Installation
 
@@ -19,11 +19,20 @@ Instead of the original macOS-only Swift module, this fork downloads the ewt-rs 
 
 *** Dynamic module
 
-**** Pre-built (recommendation)
+**** Pre-built (recommended)
 
-If you enable =emt-mode= and the module cannot be found, it will prompt whether to automatically download the ewt-rs pre-built module from GitHub. Or you can manually call =emt-download-module= to download it. The module is placed at =emt-lib-path= (by default =~/.emacs.d/modules/libEMT.<suffix>=).
+If you enable =emt-mode= and the module cannot be found, it will prompt you to download a pre-built module from GitHub or build from source. You can also manually call =emt-download-module= to download it. The module is placed at =emt-lib-path= (by default =~/.emacs.d/modules/libEMT.<suffix>=).
 
-*Current version of the ewt-rs module is v0.4.0.*
+**** Build from source (optional)
+
+Requires the [[https://rustup.rs/][Rust toolchain]]. Build manually from the =module/= directory in the repo:
+
+#+begin_src shell
+  cd module
+  cargo build --release
+  cp target/release/libemt_module.dylib ~/.emacs.d/modules/libEMT.dylib  # macOS
+  # cp target/release/libemt_module.so ~/.emacs.d/modules/libEMT.so      # Linux
+#+end_src
 
 *** Install package
 
@@ -50,10 +59,6 @@ The size of LRU cache. Default is =50=.
 
 The path to the dynamic library for emt. Default is =~/.emacs.d/modules/libEMT<suffix>=.
 
-*** =emt-windows-use-winrt=
-
-If non-nil, download the smaller WinRT backend on Windows instead of ICU. WinRT is recommended for Simplified Chinese; ICU for Traditional Chinese. Default is =nil=.
-
 ** Usage
 
 *** keymap: =emt-mode-map=
@@ -62,7 +67,7 @@ It remaps =forward-word=, =backward-word=, =kill-word= and =backward-kill-word= 
 
 *** Minor mode
 
-It calls =emt-ensure=, which load dynamic modeuls and set =emt-mode-map=.
+It calls =emt-ensure=, which loads the dynamic module and sets =emt-mode-map=.
 
 *** Functions
 
@@ -76,11 +81,15 @@ Return the word at point. If current point is at bound of a word, return the one
 
 **** =emt-download-module=
 
-Download the ewt-rs dynamic module from GitHub releases. Supports macOS, Linux, and Windows. If PATH is non-nil, download the module to PATH.
+Download the pre-built dynamic module from GitHub releases.
+
+**** =emt-build-module=
+
+Build the dynamic module from source using cargo.
 
 **** =emt-ensure=
 
-Ensure the dynamic module is loaded, downloading it if necessary.
+Ensure the dynamic module is loaded, downloading or building it if necessary.
 
 **** =emt-split=
 
@@ -111,4 +120,4 @@ CJK compatible version of =mark-word=.
 ** Acknowledgements
 
 - [[https://github.com/roife/emt][roife/emt]]: The original macOS-only EMT package, inspired by [[https://github.com/cireu/jieba.el/][jieba.el]].
-- [[https://github.com/Master-Hash/ewt-rs][Master-Hash/ewt-rs]]: Cross-platform tokenizer backend used by this fork.
+- [[https://github.com/messense/jieba-rs][jieba-rs]]: The Jieba Chinese word segmentation library implemented in Rust.
