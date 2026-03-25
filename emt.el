@@ -60,7 +60,8 @@ by `buffer-chars-modified-tick'."
   :group 'emt)
 
 (defcustom emt-lib-path
-  (concat user-emacs-directory "modules/libEMT" module-file-suffix)
+  (expand-file-name (concat "modules/libemt_module" module-file-suffix)
+                    user-emacs-directory)
   "The path to the dynamic library for emt."
   :type 'string
   :group 'emt)

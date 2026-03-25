@@ -40,7 +40,7 @@ Korean Hangul.
 
 If the module cannot be found, =emt-ensure= prompts to download the pre-built
 binary release.  The module is placed at =emt-lib-path=, which defaults to
-=~/.emacs.d/modules/libEMT.<suffix>=.
+=~/.emacs.d/modules/libemt_module.<suffix>=.
 
 **** Build from source
 
@@ -49,8 +49,8 @@ Requires the [[https://rustup.rs/][Rust toolchain]].
 #+begin_src shell
   cd module
   cargo build --release
-  cp target/release/libemt_module.dylib ~/.emacs.d/modules/libEMT.dylib  # macOS
-  # cp target/release/libemt_module.so ~/.emacs.d/modules/libEMT.so      # Linux
+  cp target/release/libemt_module.dylib ~/.emacs.d/modules/libemt_module.dylib  # macOS
+  # cp target/release/libemt_module.so ~/.emacs.d/modules/libemt_module.so      # Linux
 #+end_src
 
 *** Install package

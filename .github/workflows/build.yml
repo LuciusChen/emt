@@ -1,12 +1,41 @@
-name: Build dynamic module
+name: CI
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
+  pull_request:
+  workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: 31.1
+
+      - name: Build native module
+        working-directory: module
+        run: cargo build --release
+
+      - name: Run ERT tests
+        run: |
+          emacs -Q --batch \
+            -L . \
+            -L test \
+            -l test/emt-test.el \
+            -f ert-run-tests-batch-and-exit
+
   build:
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         include:
@@ -55,6 +84,7 @@ jobs:
           path: ${{ matrix.artifact }}
 
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
