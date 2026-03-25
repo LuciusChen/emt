@@ -2,30 +2,49 @@
 
 ** Introduction
 
-A fork of [[https://github.com/roife/emt][EMT]] with cross-platform Chinese word segmentation powered by [[https://github.com/messense/jieba-rs][jieba-rs]].
+EMT provides Han word boundaries for Emacs backed by [[https://github.com/messense/jieba-rs][jieba-rs]].
 
-Instead of the original macOS-only Swift module (or the ICU-based ewt-rs), this fork uses a built-in Rust dynamic module with jieba-rs, providing accurate Chinese word segmentation on all platforms:
+It keeps the =emt= package name and a compatibility surface so existing configs
+and downstream packages can migrate without a hard rename.
 
-- macOS (aarch64, x86_64)
-- Linux (x86_64)
-- Windows (x86_64)
+The package now integrates with Emacs' =find-word-boundary-function-table=
+instead of remapping only a handful of commands.  In =emt-mode=, built-in word
+motion commands such as =forward-word=, =kill-word=, =mark-word=, and
+=transpose-words= become segmentation aware for Chinese text.
+
+EMT focuses on Han text.  It does not attempt to segment Japanese kana or
+Korean Hangul.
+
+** Features
+
+- Han-aware word motion via Emacs' native word-boundary hook
+- Buffer-local =emt-mode= plus convenient =global-emt-mode=
+- Compatibility wrappers for callers that want EMT behavior without enabling
+  the minor mode
+- Per-buffer segmentation cache invalidated by
+  =buffer-chars-modified-tick=
+- Cross-platform dynamic module via Rust and jieba-rs
 
 ** Installation
 
 *** Requirements
 
-- Emacs 26.1 or later, built with dynamic module support (use =--with-modules= during compilation)
+- Emacs 26.1 or later, built with dynamic module support
+- An Emacs build that provides =find-word-boundary-function-table= for
+  =emt-mode=
 - macOS, Linux, or Windows
 
 *** Dynamic module
 
-**** Pre-built (recommended)
+**** Pre-built
 
-If you enable =emt-mode= and the module cannot be found, it will prompt you to download a pre-built module from GitHub or build from source. You can also manually call =emt-download-module= to download it. The module is placed at =emt-lib-path= (by default =~/.emacs.d/modules/libEMT.<suffix>=).
+If the module cannot be found, =emt-ensure= prompts to download the pre-built
+binary release.  The module is placed at =emt-lib-path=, which defaults to
+=~/.emacs.d/modules/libEMT.<suffix>=.
 
-**** Build from source (optional)
+**** Build from source
 
-Requires the [[https://rustup.rs/][Rust toolchain]]. Build manually from the =module/= directory in the repo:
+Requires the [[https://rustup.rs/][Rust toolchain]].
 
 #+begin_src shell
   cd module
@@ -36,88 +55,106 @@ Requires the [[https://rustup.rs/][Rust toolchain]]. Build manually from the =mo
 
 *** Install package
 
-Install with =straight= and =use-package=:
-
 #+begin_src emacs-lisp
   (use-package emt
     :straight (:host github :repo "LuciusChen/emt"
                      :files ("*.el"))
-    :hook (after-init . emt-mode))
+    :config
+    (global-emt-mode 1))
 #+end_src
 
 ** Customization
 
 *** =emt-use-cache=
 
-Caches for results of tokenization if non-nil. Default is =t=.
+If non-nil, EMT caches segmentation results for contiguous Han runs in each
+buffer.
 
 *** =emt-cache-lru-size=
 
-The size of LRU cache. Default is =50=.
+Compatibility variable retained for older configs.  It no longer affects cache
+behavior.
 
 *** =emt-lib-path=
 
-The path to the dynamic library for emt. Default is =~/.emacs.d/modules/libEMT<suffix>=.
+Path to the dynamic module.
 
 ** Usage
 
-*** keymap: =emt-mode-map=
+*** Minor modes
 
-It remaps =forward-word=, =backward-word=, =kill-word= and =backward-kill-word= to use emt's version.
+**** =emt-mode=
 
-*** Minor mode
+Buffer-local mode that installs EMT's word-boundary handlers for Han text while
+preserving the buffer's existing =find-word-boundary-function-table= entries for
+other characters.
 
-It calls =emt-ensure=, which loads the dynamic module and sets =emt-mode-map=.
+**** =global-emt-mode=
 
-*** Functions
+Enable =emt-mode= in most buffers.
 
-**** =emt-word-at-point-or-forward=
+*** Public API
 
-Return the word at point. If current point is at bound of a word, return the one forward.
+**** =emt-segment=
 
-**** =emt-word-at-point-or-backward=
+#+begin_src emacs-lisp
+  (emt-segment "测试封装功能")
+  ;; => [(0 . 2) (2 . 4) (4 . 6)]
+#+end_src
 
-Return the word at point. If current point is at bound of a word, return the one backward.
-
-**** =emt-download-module=
-
-Download the pre-built dynamic module from GitHub releases.
-
-**** =emt-build-module=
-
-Build the dynamic module from source using cargo.
-
-**** =emt-ensure=
-
-Ensure the dynamic module is loaded, downloading or building it if necessary.
+Returns a vector of relative word bounds.
 
 **** =emt-split=
 
-Split string into a list of words.
+Compatibility wrapper that returns a list of relative word bounds.
 
-Return a list of word bounds (a cons of the beginning position and the ending position of a word)
+**** =emt-bounds-at-point=
 
-**** =emt-forward-word=
+Returns absolute buffer bounds of the Han word at point, or nil.
 
-CJK compatible version of =forward-word=.
+**** =emt-word-at-point-or-forward=
 
-**** =emt-backward-word=
+Returns the Han word at point, or the next one when point is on a boundary.
 
-CJK compatible version of =backward-word=.
+**** =emt-word-at-point-or-backward=
 
-**** =emt-kill-word=
+Returns the Han word at point, or the previous one when point is on a boundary.
 
-CJK compatible version of =kill-word=.
+**** =emt-forward-word= / =emt-backward-word=
 
-**** =emt-backward-kill-word=
+Compatibility wrappers around built-in word motion using EMT's boundary rules.
+These work even if =emt-mode= is not enabled.
 
-CJK compatible version of =backward-kill-word=.
+**** =emt-kill-word= / =emt-backward-kill-word= / =emt-mark-word=
 
-**** =emt-mark-word=
+Compatibility wrappers built on top of EMT-aware word motion.
 
-CJK compatible version of =mark-word=.
+**** =emt-ensure=
+
+Load the dynamic module and verify the required entry points exist.
+
+**** =emt-download-module=
+
+Download a pre-built module release.
+
+** Notes
+
+- =emt-mode= changes how Emacs finds word boundaries; it does not remap
+  commands.
+- Commands that bypass =forward-word= on purpose, such as code using
+  =forward-word-strictly= or independent regexp logic, are outside EMT's scope.
+- Compatibility wrappers remain available for downstream packages and scripts.
+
+** Relation To EMT
+
+- The original [[https://github.com/roife/emt][roife/emt]] package established the =emt= name and the idea of
+  editor-side Chinese word segmentation.
+- This repository uses a different implementation: Rust module, jieba-rs
+  backend, Emacs word-boundary integration, and buffer-local caching.
+- The package keeps compatible entry points where practical so existing users
+  and downstream packages do not need a flag day rename.
 
 ** Acknowledgements
 
-- [[https://github.com/roife/emt][roife/emt]]: The original macOS-only EMT package, inspired by [[https://github.com/cireu/jieba.el/][jieba.el]].
-- [[https://github.com/messense/jieba-rs][jieba-rs]]: The Jieba Chinese word segmentation library implemented in Rust.
+- [[https://github.com/roife/emt][roife/emt]]: the original project that established the EMT package name
+- [[https://github.com/messense/jieba-rs][jieba-rs]]: the segmentation backend used by the Rust module

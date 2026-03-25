@@ -1,11 +1,11 @@
-;;; emt.el --- Tokenizing CJK words with NLP tokenizer  -*- lexical-binding: t; -*-
+;;; emt.el --- Han word boundaries via jieba-rs  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2023 Roife Wu
 
 ;; Author: Roife Wu <roifewu@gmail.com>
 ;; Maintainer: LuciusChen
 ;; URL: https://github.com/LuciusChen/emt
-;; Version: 3.0.0
+;; Version: 4.0.0
 ;; Package-Requires: ((emacs "26.1"))
 ;; Keywords: chinese, cjk, tokenizer, natural language, segmentation
 
@@ -26,31 +26,36 @@
 
 ;;; Commentary:
 
-;; A fork of EMT (https://github.com/roife/emt) with cross-platform support
-;; via a built-in Rust dynamic module using jieba-rs for Chinese word
-;; segmentation.
-;;
-;; Supports macOS, Linux, and Windows.
+;; EMT provides Han word boundaries backed by jieba-rs.  It keeps the `emt'
+;; package name and compatibility surface for existing users.  In `emt-mode',
+;; it integrates with `find-word-boundary-function-table' so built-in word
+;; motion commands like `forward-word' and `kill-word' become segmentation
+;; aware for Chinese text.  Compatibility wrappers are retained for callers
+;; that want EMT behavior without enabling the minor mode.
 
 ;;; Code:
 
-(eval-when-compile (require 'thingatpt))
-(eval-when-compile (require 'subr-x))
+(require 'thingatpt)
+
+(declare-function emt--segment nil (str))
 
 ;;; Customize
 
 (defgroup emt ()
-  "Tokenize CJK words with NLP tokenizer."
+  "Han word boundaries backed by jieba-rs."
   :group 'chinese
   :prefix "emt-")
 
 (defcustom emt-use-cache t
-  "Caches for results of tokenization if non-nil."
+  "Cache segmentation results for contiguous Han runs if non-nil."
   :type 'boolean
   :group 'emt)
 
 (defcustom emt-cache-lru-size 50
-  "The size of LRU cache for tokenization results."
+  "Obsolete compatibility option for the pre-rewrite global cache.
+
+This value is ignored.  EMT now uses a per-buffer cache that is invalidated
+by `buffer-chars-modified-tick'."
   :type 'integer
   :group 'emt)
 
@@ -65,181 +70,287 @@
 (defconst emt--module-version "v0.1.0"
   "The version of the emt dynamic module.")
 
-(defvar emt--root (file-name-directory (or load-file-name buffer-file-name))
-  "The path to the root of the package.")
+(defconst emt--han-ranges
+  '((#x3400 . #x4DBF)
+    (#x4E00 . #x9FFF)
+    (#xF900 . #xFAFF)
+    (#x20000 . #x2A6DF)
+    (#x2A700 . #x2B73F)
+    (#x2B740 . #x2B81F)
+    (#x2B820 . #x2CEAF)
+    (#x2CEB0 . #x2EBEF)
+    (#x2EBF0 . #x2EE5F)
+    (#x2F800 . #x2FA1F)
+    (#x30000 . #x3134F)
+    (#x31350 . #x323AF))
+  "Unicode ranges treated as Han by EMT.")
 
-(defvar emt--cjk-regex-forward "\\(\\cc\\|\\cj\\|\\ch\\)+\\W*$"
-  "Forward regex for CJK.")
+(defconst emt--empty-char-table
+  (make-char-table nil)
+  "Used to disable EMT's boundary hook while EMT is already searching.")
 
-(defvar emt--cjk-regex-backward "^\\W*\\(\\cc\\|\\cj\\|\\ch\\)+"
-  "Backward regex for CJK.")
+(defconst emt--word-boundary-function-table
+  (let ((tab (make-char-table nil)))
+    (dolist (range emt--han-ranges)
+      (set-char-table-range tab range #'emt--find-word-boundary))
+    tab)
+  "Boundary handlers installed by `emt-mode' for Han characters.")
 
 (defvar emt--lib-loaded nil
-  "Whether dynamic module for emt is loaded.")
-
-(defvar emt--cache-set (make-hash-table :test #'equal)
-  "The hash table for caching tokenization results.")
-
-(defvar emt--cache-lru-list nil
-  "The LRU list for caching tokenization results.")
+  "Whether the dynamic module for EMT is loaded.")
 
 (defvar emt--lib-fns
-  '(emt--do-split-helper
-    emt--word-at-point-or-forward-helper)
-  "The list of functions that must exist in the dynamic module.")
+  '(emt--segment
+    emt--do-split-helper)
+  "Functions that must exist in the dynamic module.")
 
-;;; Cache
+(defvar-local emt--cache nil
+  "Buffer-local cache for Han run segmentation results.")
 
-(defun emt--cache-get (key)
-  "Get the value of KEY in cache."
-  (let ((leading 0))
-    (when (zerop (string-match "\\W*" key))
-      (setq leading (match-end 0)))
-    (setq key (string-trim (substring-no-properties key) "\\W*" "\\W*"))
-    (let ((value (gethash key emt--cache-set)))
-      (when value
-        (setq emt--cache-lru-list (delete key emt--cache-lru-list))
-        (push key emt--cache-lru-list))
-      (if (zerop leading)
-          value
-        (mapcar (lambda (pair) (cons (+ (car pair) leading)
-                                     (+ (cdr pair) leading)))
-                value)))))
+(defvar-local emt--cache-tick nil
+  "Modification tick associated with `emt--cache'.")
 
-(defun emt--cache-put (key value)
-  "Put KEY and VALUE into cache."
-  (let ((leading 0))
-    (when (zerop (string-match "\\W*" key))
-      (setq leading (match-end 0)))
-    (unless (zerop leading)
-      (setq value (mapcar (lambda (pair) (cons (- (car pair) leading)
-                                               (- (cdr pair) leading)))
-                          value)))
-    (setq key (string-trim (substring-no-properties key) "\\W*" "\\W*"))
-    (puthash key value emt--cache-set)
-    (push key emt--cache-lru-list)
-    (when (> (length emt--cache-lru-list) emt-cache-lru-size)
-      (setq emt--cache-lru-list (butlast emt--cache-lru-list)))))
+(defvar-local emt--saved-find-word-boundary-function-table nil
+  "Original buffer-local word boundary table saved by `emt-mode'.")
+
+(defvar-local emt--saved-find-word-boundary-function-table-was-local nil
+  "Whether `find-word-boundary-function-table' was buffer-local before EMT.")
 
 ;;; Helpers
 
-(defun emt--get-bounds-at-point (direction)
-  "Get the bounds of the CJK string at point.
+(defmacro emt--with-word-boundaries (&rest body)
+  "Evaluate BODY with EMT's boundary table enabled for the current buffer."
+  `(let ((find-word-boundary-function-table
+          (emt--compose-word-boundary-function-table
+           find-word-boundary-function-table)))
+     ,@body))
 
-DIRECTION can be `forward', `backward', or `all'."
-  (let* ((pos (point))
-         (beg pos)
-         (end pos))
-    (when (or (eq direction 'forward) (eq direction 'all))
-      (save-excursion
-        (forward-word)
-        (when (string-match-p emt--cjk-regex-forward
-                              (buffer-substring-no-properties pos (point)))
-          (setq end (point)))))
-    (when (or (eq direction 'backward) (eq direction 'all))
-      (save-excursion
-        (backward-word)
-        (when (string-match-p emt--cjk-regex-backward
-                              (buffer-substring-no-properties (point) pos))
-          (setq beg (point)))))
-    (cons beg end)))
+(defun emt--word-boundary-supported-p ()
+  "Return non-nil when this Emacs has word-boundary hook support."
+  (boundp 'find-word-boundary-function-table))
 
-(defun emt--word-at-point (back)
-  "Return the word at point.  If BACK is non-nil, return the word backward."
-  (unless emt--lib-loaded (error "Dynamic module not loaded"))
-  (pcase-let* ((`(,beg . ,end) (emt--get-bounds-at-point 'all))
-               (index (- (point) beg))
-               (`(,word-beg . ,word-end)
-                (emt--word-at-point-or-forward-helper
-                 (buffer-substring-no-properties beg end)
-                 (if (and back (> index 0)) (1- index) index))))
-    (if (eq word-beg word-end)
-        (word-at-point)
-      (buffer-substring (+ beg word-beg) (+ beg word-end)))))
+(defun emt--ensure-word-boundary-support ()
+  "Signal an error if this Emacs cannot install EMT's boundary handlers."
+  (unless (emt--word-boundary-supported-p)
+    (error "EMT requires Emacs with find-word-boundary-function-table support")))
 
-(defun emt--upperbound (pred vec)
-  "Binary search for the last element in VEC satisfying PRED."
-  (if (zerop (length vec)) nil
-    (let ((start 0)
-          (end (1- (length vec))))
-      (while (< start end)
-        (let ((mid (ash (+ start end 1) -1)))
-          (if (funcall pred (elt vec mid))
-              (setq start mid)
-            (setq end (1- mid)))))
-      (elt vec start))))
+(defun emt--han-char-p (char)
+  "Return non-nil if CHAR is handled by EMT."
+  (and char (functionp (aref emt--word-boundary-function-table char))))
 
-(defun emt--lowerbound (pred vec)
-  "Binary search for the first element in VEC satisfying PRED."
-  (if (zerop (length vec)) nil
-    (let ((start 0)
-          (end (1- (length vec))))
-      (while (< start end)
-        (let ((mid (ash (+ start end) -1)))
-          (if (funcall pred (elt vec mid))
-              (setq end mid)
-            (setq start (1+ mid)))))
-      (elt vec end))))
+(defun emt--compose-word-boundary-function-table (base-table)
+  "Return a boundary table that preserves BASE-TABLE and adds EMT handlers."
+  (let ((table (if (char-table-p base-table)
+                   (copy-sequence base-table)
+                 (make-char-table nil))))
+    (dolist (range emt--han-ranges table)
+      (set-char-table-range table range #'emt--find-word-boundary))))
+
+(defun emt--ensure-cache ()
+  "Return the current buffer cache, invalidating it after edits."
+  (let ((tick (buffer-chars-modified-tick)))
+    (unless (hash-table-p emt--cache)
+      (setq emt--cache (make-hash-table :test #'equal)
+            emt--cache-tick tick))
+    (unless (equal emt--cache-tick tick)
+      (clrhash emt--cache)
+      (setq emt--cache-tick tick))
+    emt--cache))
+
+(defun emt--cjk-run-at (pos)
+  "Return the contiguous Han run containing POS as (BEG . END), or nil."
+  (save-excursion
+    (goto-char pos)
+    (when (emt--han-char-p (char-after))
+      (let ((end (progn
+                   (while (emt--han-char-p (char-after))
+                     (forward-char 1))
+                   (point))))
+        (while (emt--han-char-p (char-before))
+          (backward-char 1))
+        (cons (point) end)))))
+
+(defun emt--segment-index-at (segments offset)
+  "Return the index in SEGMENTS whose half-open range contains OFFSET."
+  (let ((low 0)
+        (high (1- (length segments)))
+        found)
+    (while (and (not found) (<= low high))
+      (let* ((mid (+ low (ash (- high low) -1)))
+             (segment (aref segments mid))
+             (beg (car segment))
+             (end (cdr segment)))
+        (cond
+         ((< offset beg)
+          (setq high (1- mid)))
+         ((>= offset end)
+          (setq low (1+ mid)))
+         (t
+          (setq found mid)))))
+    found))
+
+(defun emt--segment-run (run-beg run-end)
+  "Return a segment vector for the Han run between RUN-BEG and RUN-END."
+  (let ((text (buffer-substring-no-properties run-beg run-end)))
+    (if emt-use-cache
+        (let* ((cache (emt--ensure-cache))
+               (key (cons run-beg run-end))
+               (cached (gethash key cache)))
+          (or cached
+              (let ((segments (emt--segment text)))
+                (puthash key segments cache)
+                segments)))
+      (emt--segment text))))
+
+(defun emt--bounds-at-buffer-position (pos)
+  "Return the Han word bounds containing POS, or nil."
+  (when-let* ((run (emt--cjk-run-at pos))
+              (segments (emt--segment-run (car run) (cdr run)))
+              (index (emt--segment-index-at segments (- pos (car run)))))
+    (let* ((segment (aref segments index))
+           (run-beg (car run)))
+      (cons (+ run-beg (car segment))
+            (+ run-beg (cdr segment))))))
+
+(defun emt--bounds-at-point-internal (direction)
+  "Return Han word bounds around point.
+
+If DIRECTION is `forward', prefer the word after point when point is on a
+boundary.  If DIRECTION is `backward', prefer the word before point."
+  (let ((pos (point)))
+    (or (and (eq direction 'backward)
+             (> pos (point-min))
+             (emt--bounds-at-buffer-position (1- pos)))
+        (and (< pos (point-max))
+             (emt--bounds-at-buffer-position pos))
+        (and (> pos (point-min))
+             (emt--bounds-at-buffer-position (1- pos))))))
 
 (defun emt--move-by-word-decide-bounds-direction (direction)
-  "Decide the CJK bounds direction based on movement DIRECTION."
-  (if (eq direction 'forward)
-      (if (and (char-after) (string-match "\\W" (char-to-string (char-after))))
-          'forward
-        'all)
-    (if (and (char-before) (string-match "\\W" (char-to-string (char-before))))
-        'backward
-      'all)))
+  "Compatibility helper kept for downstream callers.
 
-(defun emt--move-by-word (direction)
-  "Move point by one CJK word in DIRECTION (`forward' or `backward')."
-  (pcase-let ((forward-p (eq direction 'forward))
-              (`(,beg . ,end)
-               (emt--get-bounds-at-point
-                (emt--move-by-word-decide-bounds-direction direction))))
-    (if (eq beg end)
-        (if forward-p (forward-word) (backward-word))
-      (let* ((text (buffer-substring-no-properties beg end))
-             (pos (- (point) beg))
-             (pred (if forward-p (lambda (x) (> x pos)) (lambda (x) (< x pos))))
-             (target-bound
-              (funcall (if forward-p #'emt--lowerbound #'emt--upperbound)
-                       pred
-                       (mapcar (if forward-p #'cdr #'car) (emt-split text)))))
-        (if (and target-bound (funcall pred target-bound))
-            (goto-char (+ beg target-bound))
-          (if forward-p (forward-word) (backward-word)))))))
+Return a legacy bounds lookup DIRECTION for word movement."
+  (if (eq direction 'forward)
+      (if (emt--han-char-p (char-after))
+          'all
+        'forward)
+    (if (or (emt--han-char-p (char-after))
+            (emt--han-char-p (char-before)))
+        'all
+      'backward)))
+
+(defun emt--get-bounds-at-point (direction)
+  "Compatibility helper returning Han run bounds around point.
+
+DIRECTION may be `forward', `backward', or `all'.  The return value is a
+cons cell (BEG . END).  If no Han run is available for the requested
+direction, return (POINT . POINT)."
+  (let* ((pos (point))
+         (run
+          (pcase direction
+            ('forward
+             (and (emt--han-char-p (char-after))
+                  (emt--cjk-run-at pos)))
+            ('backward
+             (or (and (emt--han-char-p (char-after))
+                      (emt--cjk-run-at pos))
+                 (and (> pos (point-min))
+                      (emt--han-char-p (char-before))
+                      (emt--cjk-run-at (1- pos)))))
+            (_
+             (or (and (emt--han-char-p (char-after))
+                      (emt--cjk-run-at pos))
+                 (and (> pos (point-min))
+                      (emt--han-char-p (char-before))
+                      (emt--cjk-run-at (1- pos))))))))
+    (or run (cons pos pos))))
+
+(defun emt--word-at-point (direction)
+  "Return the word at point, preferring DIRECTION when on a boundary."
+  (if-let* ((bounds (emt--bounds-at-point-internal direction)))
+      (buffer-substring-no-properties (car bounds) (cdr bounds))
+    (word-at-point t)))
+
+(defun emt--enable-mode ()
+  "Enable `emt-mode' in the current buffer."
+  (emt--ensure-word-boundary-support)
+  (emt-ensure)
+  (setq emt--saved-find-word-boundary-function-table
+        find-word-boundary-function-table
+        emt--saved-find-word-boundary-function-table-was-local
+        (local-variable-p 'find-word-boundary-function-table (current-buffer)))
+  (setq-local find-word-boundary-function-table
+              (emt--compose-word-boundary-function-table
+               find-word-boundary-function-table)))
+
+(defun emt--disable-mode ()
+  "Disable `emt-mode' in the current buffer."
+  (if emt--saved-find-word-boundary-function-table-was-local
+      (setq-local find-word-boundary-function-table
+                  emt--saved-find-word-boundary-function-table)
+    (kill-local-variable 'find-word-boundary-function-table))
+  (setq emt--saved-find-word-boundary-function-table nil
+        emt--saved-find-word-boundary-function-table-was-local nil))
+
+(defun emt--find-word-boundary (pos limit)
+  "Boundary handler installed in `find-word-boundary-function-table'.
+
+POS and LIMIT follow the contract of `find-word-boundary-function-table'."
+  (let ((find-word-boundary-function-table emt--empty-char-table))
+    (if-let* ((run (emt--cjk-run-at pos))
+              (segments (emt--segment-run (car run) (cdr run)))
+              (index (emt--segment-index-at segments (- pos (car run)))))
+        (let* ((segment (aref segments index))
+               (run-beg (car run))
+               (beg (+ run-beg (car segment)))
+               (end (+ run-beg (cdr segment))))
+          (if (< pos limit)
+              (min end limit)
+            (max beg limit)))
+      (if (< pos limit) limit pos))))
 
 ;;; Public API
 
+(defun emt-segment (str)
+  "Split STR into a vector of word bounds (BEG . END)."
+  (unless emt--lib-loaded
+    (error "Dynamic module not loaded"))
+  (let ((segments (emt--segment str)))
+    (if (vectorp segments)
+        segments
+      (vconcat segments))))
+
 (defun emt-split (str)
   "Split STR into a list of word bounds (BEG . END)."
-  (if emt--lib-loaded
-      (if-let ((cached (and emt-use-cache (emt--cache-get str))))
-          cached
-        (let ((result (emt--do-split-helper str)))
-          (when emt-use-cache (emt--cache-put str result))
-          result))
-    (error "Dynamic module not loaded")))
+  (append (emt-segment str) nil))
 
 (defun emt-get-arch ()
   "Return the CPU architecture string for the current system."
   (cond
    ((string-match-p "aarch64\\|arm64" system-configuration) "aarch64")
-   ((string-match-p "x86_64"          system-configuration) "x86_64")
+   ((string-match-p "x86_64" system-configuration) "x86_64")
    (t (error "Unsupported architecture: %s" system-configuration))))
 
 ;;;###autoload
-(defun emt-word-at-point-or-forward ()
-  "Return the CJK word at point, or the one forward if at a boundary."
+(defun emt-bounds-at-point ()
+  "Return the Han word bounds at point as (BEG . END), or nil."
   (interactive)
-  (emt--word-at-point nil))
+  (emt-ensure)
+  (emt--bounds-at-point-internal 'forward))
+
+;;;###autoload
+(defun emt-word-at-point-or-forward ()
+  "Return the Han word at point, or the one forward if at a boundary."
+  (interactive)
+  (emt-ensure)
+  (emt--word-at-point 'forward))
 
 ;;;###autoload
 (defun emt-word-at-point-or-backward ()
-  "Return the CJK word at point, or the one backward if at a boundary."
+  "Return the Han word at point, or the one backward if at a boundary."
   (interactive)
-  (emt--word-at-point t))
+  (emt-ensure)
+  (emt--word-at-point 'backward))
 
 ;;;###autoload
 (defun emt-download-module (&optional path)
@@ -271,38 +382,37 @@ Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
 
 ;;;###autoload
 (defun emt-forward-word (&optional arg)
-  "CJK-compatible `forward-word', moving ARG words."
+  "Move forward by ARG words using EMT's Han boundary rules."
   (interactive "^p")
-  (setq arg (or arg 1))
-  (let ((direction (if (< arg 0) 'backward 'forward))
-        (count (abs arg))
-        (i 0))
-    (while (and (< i count) (emt--move-by-word direction))
-      (setq i (1+ i)))
-    (eq i count)))
+  (emt--ensure-word-boundary-support)
+  (emt-ensure)
+  (emt--with-word-boundaries
+   (forward-word (or arg 1))))
 
 ;;;###autoload
 (defun emt-backward-word (&optional arg)
-  "CJK-compatible `backward-word', moving ARG words."
+  "Move backward by ARG words using EMT's Han boundary rules."
   (interactive "^p")
-  (setq arg (or arg 1))
-  (emt-forward-word (- arg)))
+  (emt--ensure-word-boundary-support)
+  (emt-ensure)
+  (emt--with-word-boundaries
+   (backward-word (or arg 1))))
 
 ;;;###autoload
 (defun emt-kill-word (arg)
-  "CJK-compatible `kill-word', killing ARG words forward."
+  "Kill ARG words forward using EMT's Han boundary rules."
   (interactive "p")
   (kill-region (point) (progn (emt-forward-word arg) (point))))
 
 ;;;###autoload
 (defun emt-backward-kill-word (arg)
-  "CJK-compatible `backward-kill-word', killing ARG words backward."
+  "Kill ARG words backward using EMT's Han boundary rules."
   (interactive "p")
   (emt-kill-word (- arg)))
 
 ;;;###autoload
 (defun emt-mark-word (&optional arg)
-  "CJK-compatible `mark-word', marking ARG words."
+  "Mark ARG words using EMT's Han boundary rules."
   (interactive "p")
   (set-mark (point))
   (emt-forward-word arg))
@@ -325,23 +435,18 @@ Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
 ;;; Minor mode
 
 ;;;###autoload
-(defvar emt-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [remap forward-word]          #'emt-forward-word)
-    (define-key map [remap backward-word]         #'emt-backward-word)
-    (define-key map [remap kill-word]             #'emt-kill-word)
-    (define-key map [remap backward-kill-word]    #'emt-backward-kill-word)
-    (define-key map [remap mark-word]             #'emt-mark-word)
-    (define-key map [remap word-at-point]         #'emt-word-at-point-or-forward)
-    map))
+(define-minor-mode emt-mode
+  "Buffer-local minor mode for Han word boundaries via jieba-rs."
+  :lighter " emt"
+  (if emt-mode
+      (emt--enable-mode)
+    (emt--disable-mode)))
 
 ;;;###autoload
-(define-minor-mode emt-mode
-  "Minor mode for CJK word tokenization via jieba-rs."
-  :global t
-  :keymap emt-mode-map
-  :lighter "emt"
-  (when emt-mode (emt-ensure)))
+(define-globalized-minor-mode global-emt-mode emt-mode
+  (lambda ()
+    (unless (minibufferp)
+      (emt-mode 1))))
 
 (provide 'emt)
 

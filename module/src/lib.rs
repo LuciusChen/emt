@@ -31,23 +31,16 @@ pub unsafe extern "C" fn emacs_module_init(runtime: *mut emacs_runtime) -> libc:
 
         let Qfset = intern(env, c"fset".as_ptr());
 
-        // emt--do-split-helper
+        // emt--segment / emt--do-split-helper
+        let Qsegment = intern(env, c"emt--segment".as_ptr());
         let Qsplit = intern(env, c"emt--do-split-helper".as_ptr());
-        let fn_split = make_function(
+        let fn_segment = make_function(
             env, 1, 1, Some(Femt__do_split_helper),
             c"Split TEXT into word bounds using jieba.".as_ptr(),
             ptr::null_mut(),
         );
-        funcall(env, Qfset, 2, [Qsplit, fn_split].as_mut_ptr());
-
-        // emt--word-at-point-or-forward-helper
-        let Qword = intern(env, c"emt--word-at-point-or-forward-helper".as_ptr());
-        let fn_word = make_function(
-            env, 2, 2, Some(Femt__word_at_point_or_forward),
-            c"Get word bound at position N in TEXT using jieba.".as_ptr(),
-            ptr::null_mut(),
-        );
-        funcall(env, Qfset, 2, [Qword, fn_word].as_mut_ptr());
+        funcall(env, Qfset, 2, [Qsegment, fn_segment].as_mut_ptr());
+        funcall(env, Qfset, 2, [Qsplit, fn_segment].as_mut_ptr());
 
         0
     }
@@ -83,43 +76,6 @@ unsafe extern "C" fn Femt__do_split_helper(
         }
 
         funcall(env, Qvector, cells.len() as isize, cells.as_mut_ptr())
-    }
-}
-
-unsafe extern "C" fn Femt__word_at_point_or_forward(
-    env: *mut emacs_env,
-    nargs: isize,
-    args: *mut emacs_value,
-    _data: *mut raw::c_void,
-) -> emacs_value {
-    unsafe {
-        debug_assert_eq!(nargs, 2);
-        let intern = (*env).intern.unwrap_unchecked();
-        let funcall = (*env).funcall.unwrap_unchecked();
-        let make_integer = (*env).make_integer.unwrap_unchecked();
-        let extract_integer = (*env).extract_integer.unwrap_unchecked();
-
-        let Qcons = intern(env, c"cons".as_ptr());
-
-        let text = copy_string(env, args).unwrap_unchecked();
-        let n = extract_integer(env, *args.offset(1));
-
-        let words = JIEBA.cut(&text, false);
-        let mut pos = 0i64;
-        for w in &words {
-            let l = pos;
-            let r = pos + w.chars().count() as i64;
-            if n < r {
-                let lv = make_integer(env, l);
-                let rv = make_integer(env, r);
-                return funcall(env, Qcons, 2, [lv, rv].as_mut_ptr());
-            }
-            pos = r;
-        }
-
-        let lv = make_integer(env, pos);
-        let rv = make_integer(env, pos);
-        funcall(env, Qcons, 2, [lv, rv].as_mut_ptr())
     }
 }
 
