@@ -5,7 +5,7 @@
 ;; Author: Roife Wu <roifewu@gmail.com>
 ;; Maintainer: LuciusChen
 ;; URL: https://github.com/LuciusChen/emt
-;; Version: 4.0.0
+;; Version: 0.1.0
 ;; Package-Requires: ((emacs "26.1"))
 ;; Keywords: chinese, cjk, tokenizer, natural language, segmentation
 

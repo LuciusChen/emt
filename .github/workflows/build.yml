@@ -20,7 +20,7 @@ jobs:
 
       - uses: purcell/setup-emacs@master
         with:
-          version: 31.1
+          version: 30.2
 
       - name: Build native module
         working-directory: module
