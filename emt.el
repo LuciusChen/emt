@@ -51,14 +51,6 @@
   :type 'boolean
   :group 'emt)
 
-(defcustom emt-cache-lru-size 50
-  "Obsolete compatibility option for the pre-rewrite global cache.
-
-This value is ignored.  EMT now uses a per-buffer cache that is invalidated
-by `buffer-chars-modified-tick'."
-  :type 'integer
-  :group 'emt)
-
 (defcustom emt-lib-path
   (expand-file-name (concat "modules/libemt_module" module-file-suffix)
                     user-emacs-directory)
@@ -133,7 +125,7 @@ by `buffer-chars-modified-tick'."
 (defun emt--ensure-word-boundary-support ()
   "Signal an error if this Emacs cannot install EMT's boundary handlers."
   (unless (emt--word-boundary-supported-p)
-    (error "EMT requires Emacs with find-word-boundary-function-table support")))
+    (user-error "EMT requires Emacs with find-word-boundary-function-table support")))
 
 (defun emt--han-char-p (char)
   "Return non-nil if CHAR is handled by EMT."
@@ -272,6 +264,26 @@ direction, return (POINT . POINT)."
       (buffer-substring-no-properties (car bounds) (cdr bounds))
     (word-at-point t)))
 
+(defun emt--missing-module-error ()
+  "Signal that the EMT dynamic module is unavailable."
+  (user-error "EMT module not found at %s; run M-x emt-download-module"
+              emt-lib-path))
+
+(defun emt--verify-module-functions ()
+  "Ensure the loaded dynamic module exposes the required entry points."
+  (dolist (fn emt--lib-fns)
+    (unless (fboundp fn)
+      (user-error "EMT module at %s is missing entry point %s"
+                  emt-lib-path fn))))
+
+(defun emt--load-module ()
+  "Load the EMT dynamic module from `emt-lib-path'."
+  (unless (file-exists-p emt-lib-path)
+    (emt--missing-module-error))
+  (load-file emt-lib-path)
+  (emt--verify-module-functions)
+  (setq emt--lib-loaded t))
+
 (defun emt--enable-mode ()
   "Enable `emt-mode' in the current buffer."
   (emt--ensure-word-boundary-support)
@@ -314,8 +326,7 @@ POS and LIMIT follow the contract of `find-word-boundary-function-table'."
 
 (defun emt-segment (str)
   "Split STR into a vector of word bounds (BEG . END)."
-  (unless emt--lib-loaded
-    (error "Dynamic module not loaded"))
+  (emt-ensure)
   (let ((segments (emt--segment str)))
     (if (vectorp segments)
         segments
@@ -330,7 +341,7 @@ POS and LIMIT follow the contract of `find-word-boundary-function-table'."
   (cond
    ((string-match-p "aarch64\\|arm64" system-configuration) "aarch64")
    ((string-match-p "x86_64" system-configuration) "x86_64")
-   (t (error "Unsupported architecture: %s" system-configuration))))
+   (t (user-error "Unsupported architecture: %s" system-configuration))))
 
 ;;;###autoload
 (defun emt-bounds-at-point ()
@@ -371,7 +382,7 @@ Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
             (concat arch "-unknown-linux-gnu"))
            ((eq system-type 'windows-nt)
             (concat arch "-pc-windows-msvc"))
-           (t (error "Unsupported platform: %s" system-type))))
+           (t (user-error "Unsupported platform: %s" system-type))))
          (lib-filename (concat "libEMT-" triple
                                (if (eq system-type 'windows-nt) ".dll"
                                  (if (eq system-type 'darwin) ".dylib" ".so"))))
@@ -420,18 +431,23 @@ Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
 
 ;;;###autoload
 (defun emt-ensure ()
-  "Ensure the dynamic module is loaded, downloading if necessary."
+  "Ensure the dynamic module is loaded.
+
+When called interactively and the module is missing, offer to download a
+pre-built release."
   (interactive)
   (unless emt--lib-loaded
-    (unless (file-exists-p emt-lib-path)
+    (cond
+     ((file-exists-p emt-lib-path)
+      (emt--load-module))
+     ((called-interactively-p 'interactive)
       (if (yes-or-no-p "EMT module not found. Download pre-built from GitHub? ")
-          (emt-download-module)
-        (error "EMT module cannot be loaded")))
-    (load-file emt-lib-path)
-    (dolist (fn emt--lib-fns)
-      (unless (fboundp fn)
-        (error "No %s function found in dynamic module" fn)))
-    (setq emt--lib-loaded t)))
+          (progn
+            (emt-download-module)
+            (emt--load-module))
+        (emt--missing-module-error)))
+     (t
+      (emt--missing-module-error)))))
 
 ;;; Minor mode
 

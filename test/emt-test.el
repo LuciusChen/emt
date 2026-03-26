@@ -51,6 +51,14 @@
      (transpose-words 1)
      (should (equal (buffer-string) "封装测试功能")))))
 
+(ert-deftest emt-test-wrapper-motion-works-without-mode ()
+  (emt-test--with-module
+   (with-temp-buffer
+     (insert "测试封装功能")
+     (goto-char (point-min))
+     (emt-forward-word 1)
+     (should (= (point) 3)))))
+
 (ert-deftest emt-test-cache-invalidates-after-edit ()
   (emt-test--with-module
    (with-temp-buffer
@@ -76,6 +84,18 @@
        (emt-mode 1)
        (emt-mode 0)
        (should (eq original find-word-boundary-function-table))))))
+
+(ert-deftest emt-test-non-han-bounds-return-nil ()
+  (emt-test--with-module
+   (with-temp-buffer
+     (insert "plain ascii")
+     (goto-char (point-min))
+     (should-not (emt-bounds-at-point)))))
+
+(ert-deftest emt-test-ensure-missing-module-signals-user-error ()
+  (let ((emt-lib-path (make-temp-name "emt-missing-module-"))
+        (emt--lib-loaded nil))
+    (should-error (emt-ensure) :type 'user-error)))
 
 (ert-deftest emt-test-meow-cjk-shims-available ()
   (emt-test--with-module

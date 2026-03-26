@@ -1,0 +1,23 @@
+* EMT Boundary Hook Design
+
+** Decision
+
+EMT uses Emacs' =find-word-boundary-function-table= for Han characters and
+delegates segmentation to the Rust =jieba-rs= module.
+
+** Why this approach
+
+- The old implementation depended on Emacs' built-in word motion to discover
+  text ranges, which is the wrong layer for fixing Chinese word boundaries.
+- Word-boundary hooks let EMT fix the boundary layer directly, so built-in
+  commands that use =forward-word= and =backward-word= improve automatically.
+- Buffer-local caches keyed by Han runs and invalidated by
+  =buffer-chars-modified-tick= are simpler and more correct than keeping a
+  global LRU of stale strings.
+
+** Deliberate limitations
+
+- EMT is Han-focused.  It does not segment kana or hangul.
+- Two private compatibility shims remain in =emt.el= for =meow-cjk=.  They are
+  retained intentionally even though the general project guideline prefers
+  deleting compatibility layers.

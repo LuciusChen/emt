@@ -38,9 +38,9 @@ Korean Hangul.
 
 **** Pre-built
 
-If the module cannot be found, =emt-ensure= prompts to download the pre-built
-binary release.  The module is placed at =emt-lib-path=, which defaults to
-=~/.emacs.d/modules/libemt_module.<suffix>=.
+If you call =M-x emt-ensure= and the module cannot be found, EMT offers to
+download the pre-built binary release.  The module is placed at =emt-lib-path=,
+which defaults to =~/.emacs.d/modules/libemt_module.<suffix>=.
 
 **** Build from source
 
@@ -69,11 +69,6 @@ Requires the [[https://rustup.rs/][Rust toolchain]].
 
 If non-nil, EMT caches segmentation results for contiguous Han runs in each
 buffer.
-
-*** =emt-cache-lru-size=
-
-Compatibility variable retained for older configs.  It no longer affects cache
-behavior.
 
 *** =emt-lib-path=
 
@@ -131,7 +126,9 @@ Compatibility wrappers built on top of EMT-aware word motion.
 
 **** =emt-ensure=
 
-Load the dynamic module and verify the required entry points exist.
+Load the dynamic module and verify the required entry points exist.  When
+called interactively and the module is missing, EMT offers to download a
+pre-built release.
 
 **** =emt-download-module=
 
