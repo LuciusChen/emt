@@ -1,0 +1,16 @@
+* EMT Release Workflow
+
+** Decision
+
+EMT uses Dependabot for =jieba-rs= update pull requests and a manually
+triggered GitHub Actions workflow for releases.
+
+** Why this approach
+
+- =jieba-rs= changes can alter segmentation behavior, so dependency updates
+  should pass through a pull request before release.
+- The release workflow performs the version bump, test run, tag creation,
+  artifact build, and GitHub release in one run.  This avoids relying on a
+  second workflow to be triggered by a tag pushed from =GITHUB_TOKEN=.
+- Manual version input keeps the release number explicit while still reducing
+  the release process to one workflow run after the update is merged.

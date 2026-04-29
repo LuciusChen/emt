@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/module"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "jieba-rs"
+    commit-message:
+      prefix: "deps"

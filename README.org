@@ -142,6 +142,20 @@ Download a pre-built module release.
   =forward-word-strictly= or independent regexp logic, are outside EMT's scope.
 - Compatibility wrappers remain available for downstream packages and scripts.
 
+** Release Process
+
+Dependabot watches =jieba-rs= in =module/Cargo.toml= and opens update pull
+requests.  After merging a dependency update, publish a new EMT release from
+GitHub Actions:
+
+1. Open the =Release= workflow.
+2. Run it from =main=.
+3. Enter the next package version without a leading =v=, for example =0.1.1=.
+
+The workflow updates the Elisp and Rust package versions, runs the module build
+and ERT suite, commits the version bump, tags =vX.Y.Z=, builds release artifacts
+for the supported platforms, and creates the GitHub release.
+
 ** Relation To EMT
 
 - The original [[https://github.com/roife/emt][roife/emt]] package established the =emt= name and the idea of
