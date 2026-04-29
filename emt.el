@@ -5,7 +5,7 @@
 ;; Author: Roife Wu <roifewu@gmail.com>
 ;; Maintainer: LuciusChen
 ;; URL: https://github.com/LuciusChen/emt
-;; Version: 0.1.1
+;; Version: 0.1.2
 ;; Package-Requires: ((emacs "26.1"))
 ;; Keywords: chinese, cjk, tokenizer, natural language, segmentation
 
@@ -60,7 +60,7 @@
 
 ;;; Internal variables
 
-(defconst emt--module-version "v0.1.1"
+(defconst emt--module-version "v0.1.2"
   "The version of the emt dynamic module.")
 
 (defconst emt--han-ranges
