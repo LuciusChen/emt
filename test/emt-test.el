@@ -86,6 +86,13 @@
        (emt-mode 0)
        (should (eq original find-word-boundary-function-table))))))
 
+(ert-deftest emt-test-mode-enable-does-not-require-module ()
+  (let ((emt-lib-path (make-temp-name "emt-missing-module-"))
+        (emt--lib-loaded nil))
+    (with-temp-buffer
+      (emt-mode 1)
+      (should emt-mode))))
+
 (ert-deftest emt-test-non-han-bounds-return-nil ()
   (emt-test--with-module
    (with-temp-buffer

@@ -184,6 +184,7 @@
 
 (defun emt--segment-run (run-beg run-end)
   "Return a segment vector for the Han run between RUN-BEG and RUN-END."
+  (emt-ensure)
   (let ((text (buffer-substring-no-properties run-beg run-end)))
     (if emt-use-cache
         (let* ((cache (emt--ensure-cache))
@@ -287,7 +288,6 @@ direction, return (POINT . POINT)."
 (defun emt--enable-mode ()
   "Enable `emt-mode' in the current buffer."
   (emt--ensure-word-boundary-support)
-  (emt-ensure)
   (setq emt--saved-find-word-boundary-function-table
         find-word-boundary-function-table
         emt--saved-find-word-boundary-function-table-was-local
