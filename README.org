@@ -132,7 +132,8 @@ pre-built release.
 
 **** =emt-download-module=
 
-Download a pre-built module release.
+Download a pre-built module release.  When installing to the default
+=emt-lib-path=, the module is loaded immediately after download.
 
 ** Notes
 

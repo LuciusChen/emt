@@ -1,6 +1,7 @@
 ;;; emt-test.el --- ERT tests for EMT  -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'cl-lib)
 (require 'subword)
 
 (add-to-list 'load-path
@@ -96,6 +97,25 @@
   (let ((emt-lib-path (make-temp-name "emt-missing-module-"))
         (emt--lib-loaded nil))
     (should-error (emt-ensure) :type 'user-error)))
+
+(ert-deftest emt-test-download-module-loads-default-path ()
+  (let* ((dir (make-temp-file "emt-test-module-" t))
+         (emt-lib-path (expand-file-name (concat "libemt_module" module-file-suffix) dir))
+         (emt--lib-loaded nil)
+         loaded)
+    (unwind-protect
+        (cl-letf (((symbol-function 'url-copy-file)
+                   (lambda (_url path &optional _ok-if-already-exists)
+                     (with-temp-file path
+                       (insert "module"))))
+                  ((symbol-function 'emt--load-module)
+                   (lambda ()
+                     (setq loaded t
+                           emt--lib-loaded t))))
+          (emt-download-module)
+          (should loaded)
+          (should (file-exists-p emt-lib-path)))
+      (delete-directory dir t))))
 
 (ert-deftest emt-test-meow-cjk-shims-available ()
   (emt-test--with-module

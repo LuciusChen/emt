@@ -369,6 +369,7 @@ POS and LIMIT follow the contract of `find-word-boundary-function-table'."
   "Download the pre-built emt dynamic module from GitHub releases.
 
 The module is placed at PATH, defaulting to `emt-lib-path'.
+When installing to `emt-lib-path', load the module after download.
 Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
   (interactive)
   (setq path (or path emt-lib-path))
@@ -390,7 +391,13 @@ Supports macOS (aarch64/x86_64), Linux (x86_64), and Windows (x86_64)."
                       emt--module-version lib-filename)))
     (message "Downloading emt module from %s ..." url)
     (url-copy-file url path t)
-    (message "EMT module installed to %s" path)))
+    (if (string-equal (expand-file-name path)
+                      (expand-file-name emt-lib-path))
+        (progn
+          (unless emt--lib-loaded
+            (emt--load-module))
+          (message "EMT module installed and loaded from %s" path))
+      (message "EMT module installed to %s" path))))
 
 ;;;###autoload
 (defun emt-forward-word (&optional arg)
@@ -442,9 +449,7 @@ pre-built release."
       (emt--load-module))
      ((called-interactively-p 'interactive)
       (if (yes-or-no-p "EMT module not found. Download pre-built from GitHub? ")
-          (progn
-            (emt-download-module)
-            (emt--load-module))
+          (emt-download-module)
         (emt--missing-module-error)))
      (t
       (emt--missing-module-error)))))
