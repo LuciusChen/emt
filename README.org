@@ -107,6 +107,16 @@ Compatibility wrapper that returns a list of relative word bounds.
 
 Returns absolute buffer bounds of the Han word at point, or nil.
 
+**** =emt-bounds-at-point-or-forward=
+
+Returns absolute buffer bounds of the Han word at point, preferring the next
+word when point is on a word boundary.
+
+**** =emt-bounds-at-point-or-backward=
+
+Returns absolute buffer bounds of the Han word at point, preferring the previous
+word when point is on a word boundary.
+
 **** =emt-word-at-point-or-forward=
 
 Returns the Han word at point, or the next one when point is on a boundary.

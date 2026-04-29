@@ -100,6 +100,14 @@
      (goto-char (point-min))
      (should-not (emt-bounds-at-point)))))
 
+(ert-deftest emt-test-public-directional-bounds ()
+  (emt-test--with-module
+   (with-temp-buffer
+     (insert "测试封装功能")
+     (goto-char 3)
+     (should (equal (emt-bounds-at-point-or-forward) '(3 . 5)))
+     (should (equal (emt-bounds-at-point-or-backward) '(1 . 3))))))
+
 (ert-deftest emt-test-ensure-missing-module-signals-user-error ()
   (let ((emt-lib-path (make-temp-name "emt-missing-module-"))
         (emt--lib-loaded nil))

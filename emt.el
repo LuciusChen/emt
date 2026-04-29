@@ -350,6 +350,16 @@ POS and LIMIT follow the contract of `find-word-boundary-function-table'."
   (emt-ensure)
   (emt--bounds-at-point-internal 'forward))
 
+(defun emt-bounds-at-point-or-forward ()
+  "Return the Han word bounds at point, preferring the word forward."
+  (emt-ensure)
+  (emt--bounds-at-point-internal 'forward))
+
+(defun emt-bounds-at-point-or-backward ()
+  "Return the Han word bounds at point, preferring the word backward."
+  (emt-ensure)
+  (emt--bounds-at-point-internal 'backward))
+
 ;;;###autoload
 (defun emt-word-at-point-or-forward ()
   "Return the Han word at point, or the one forward if at a boundary."
