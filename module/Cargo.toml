@@ -8,7 +8,7 @@ license = "GPL-3.0-or-later"
 crate-type = ["cdylib"]
 
 [dependencies]
-jieba-rs = "0.9"
+jieba-rs = "0.10"
 libc = "0.2"
 libc_alloc = "1.0"
 
