@@ -35,7 +35,10 @@ pub unsafe extern "C" fn emacs_module_init(runtime: *mut emacs_runtime) -> libc:
         let Qsegment = intern(env, c"emt--segment".as_ptr());
         let Qsplit = intern(env, c"emt--do-split-helper".as_ptr());
         let fn_segment = make_function(
-            env, 1, 1, Some(Femt__do_split_helper),
+            env,
+            1,
+            1,
+            Some(Femt__do_split_helper),
             c"Split TEXT into word bounds using jieba.".as_ptr(),
             ptr::null_mut(),
         );
@@ -64,12 +67,10 @@ unsafe extern "C" fn Femt__do_split_helper(
         let text = copy_string(env, args).unwrap_unchecked();
         let words = JIEBA.cut(&text, false);
 
-        let mut pos = 0i64;
         let mut cells: Vec<emacs_value> = Vec::with_capacity(words.len());
-        for w in &words {
-            let l = pos;
-            let r = pos + w.chars().count() as i64;
-            pos = r;
+        for token in &words {
+            let l = token.start as i64;
+            let r = token.end as i64;
             let lv = make_integer(env, l);
             let rv = make_integer(env, r);
             cells.push(funcall(env, Qcons, 2, [lv, rv].as_mut_ptr()));
