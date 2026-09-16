@@ -1,3 +1,4 @@
+# Monitor jieba-rs releases for the Rust native module.
 version: 2
 updates:
   - package-ecosystem: "cargo"
